@@ -6,7 +6,7 @@ export default defineConfig({
   workers: 2, reporter: 'list', outputDir: '../test-results/website',
   use: {baseURL: process.env.LORECREW_SITE_URL ?? 'http://127.0.0.1:4321/lorecrew/', trace: 'retain-on-failure'},
   webServer: process.env.LORECREW_SITE_URL ? undefined : {
-    command: 'node website/build.mjs --out website/dist/preview/lorecrew && python3 -m http.server 4321 --bind 127.0.0.1 --directory website/dist/preview',
+    command: 'node website/build.mjs --base /lorecrew/ --origin http://127.0.0.1:4321 --out website/dist/preview/lorecrew && python3 -m http.server 4321 --bind 127.0.0.1 --directory website/dist/preview',
     cwd: fileURLToPath(new URL('..',import.meta.url)),
     url: 'http://127.0.0.1:4321/lorecrew/', reuseExistingServer: !process.env.CI, timeout: 30000,
   },

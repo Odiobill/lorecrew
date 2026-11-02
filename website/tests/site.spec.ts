@@ -10,7 +10,7 @@ test('workflow tabs support pointer and keyboard without network model calls',as
  await expect(page.getByRole('tabpanel')).toContainText('Project workspace');
  expect(errors).toEqual([]);expect(requests.every(u=>new URL(u).origin===new URL(page.url()).origin)).toBe(true);
 });
-test('local search finds relevant guides, handles no matches and restores focus',async({page},info)=>{
+test('local search finds relevant guides, handles no matches and restores focus',async({page,baseURL},info)=>{
  await page.goto('./');
  if(info.project.name==='mobile')await page.getByRole('button',{name:'Open navigation'}).click();
  const trigger=page.locator('.search-trigger');await trigger.click();
@@ -21,7 +21,7 @@ test('local search finds relevant guides, handles no matches and restores focus'
  await input.press('Escape');await expect(page.getByRole('dialog')).not.toBeVisible();await expect(trigger).toBeFocused();
  await page.keyboard.press('Control+k');await expect(input).toBeFocused();
  await input.fill('backup');await page.locator('#search-results a').first().click();
- await expect(page).toHaveURL(/\/lorecrew\/docs\/backup-and-recovery\/$/);await expect(page.locator('h1')).toHaveText('Backup and recovery');
+ await expect(page).toHaveURL(new URL('docs/backup-and-recovery/',baseURL!).href);await expect(page.locator('h1')).toHaveText('Backup and recovery');
 });
 test('copy reports success and honest clipboard failure',async({page,context})=>{
  await context.grantPermissions(['clipboard-read','clipboard-write']);await page.goto('./');

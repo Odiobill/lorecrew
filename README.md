@@ -4,7 +4,7 @@
 
 Self-hosted AI teams for coding and personal assistance, with durable conversations and shared knowledge in a Git-backed Markdown vault.
 
-[Website](https://odiobill.github.io/lorecrew/) · [Get started](docs/getting-started.md) · [User guides](https://odiobill.github.io/lorecrew/docs/getting-started/) · [Contribute](CONTRIBUTING.md)
+[Website](https://lorecrew.dev/) · [Get started](docs/getting-started.md) · [User guides](https://lorecrew.dev/docs/getting-started/) · [Contribute](CONTRIBUTING.md)
 
 ## A crew you can make your own
 

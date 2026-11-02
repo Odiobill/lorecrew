@@ -29,8 +29,16 @@ jobs:
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npm run check:public
       - run: npm run test:site
-      - run: npm run build:site
-      - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
+      - name: Read Pages domain configuration
+        id: pages
+        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
+      - name: Build website for its configured domain
+        env:
+          LORECREW_SITE_BASE: ${{ steps.pages.outputs.base_path }}
+          LORECREW_SITE_ORIGIN: ${{ steps.pages.outputs.origin }}
+        run: |
+          lorecrew_pages_origin=$(node -e 'const url = new URL(process.env.LORECREW_SITE_ORIGIN); url.protocol = "https:"; process.stdout.write(url.origin)')
+          npm run build:site -- --base "${LORECREW_SITE_BASE}/" --origin "$lorecrew_pages_origin"
       - uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
         with:
           path: website/dist

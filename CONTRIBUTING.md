@@ -38,11 +38,11 @@ npm run test:site:browser
 The browser check starts a temporary static preview; Python 3 and Playwright Chromium are required. Build the website before running that check. To keep a preview open, run:
 
 ```sh
-node website/build.mjs --out website/dist/preview/lorecrew
+node website/build.mjs --base /lorecrew/ --origin http://127.0.0.1:4321 --out website/dist/preview/lorecrew
 python3 -m http.server 4321 --bind 127.0.0.1 --directory website/dist/preview
 ```
 
-Open `http://127.0.0.1:4321/lorecrew/`. The build defaults to the GitHub Pages path `/lorecrew/`; `node website/build.mjs --base / --out website/dist` builds for an origin root. The `Public website` workflow builds and publishes `main`. Keep its base path, repository links and canonical origin aligned when adapting it.
+Open `http://127.0.0.1:4321/lorecrew/`. The production build defaults to `https://lorecrew.dev/` at the domain root. Override `--base` and `--origin` for other deployments. The `Public website` workflow reads the configured origin and base path from GitHub Pages before building, so custom domains and repository-prefixed sites use the correct links. It publishes `main`.
 
 Keep public documentation focused on users and contributors. Do not commit planning notes, execution ledgers, review reports, test results, personal build identities, screenshots of private data or raw validation artifacts. Store internal development records outside the public repository. Test output belongs in ignored directories. The public guard checks the source boundary; package tests also inspect the actual npm file list.
 

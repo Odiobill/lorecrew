@@ -19,3 +19,18 @@ test('publishes only approved visitor assets even when private local assets are 
   assert.deepEqual((await readdir(join(out,'assets'))).sort(),['logo.svg','site.css','site.js','social-card.png']);
  }finally{await rm(probe);}
 });
+test('default production build uses lorecrew.dev at the domain root across pages and discovery files',async()=>{
+ const out=join(await root(),'site');
+ const r=spawnSync(process.execPath,['website/build.mjs','--out',out],{cwd:resolve('.'),env:process.env,encoding:'utf8'});
+ assert.equal(r.status,0,r.stderr);
+ const home=await readFile(join(out,'index.html'),'utf8');
+ assert.ok(home.includes('rel="canonical" href="https://lorecrew.dev/"'));
+ assert.ok(home.includes('href="/docs/getting-started/"'));
+ assert.ok(home.includes('content="https://lorecrew.dev/assets/social-card.png"'));
+ for(const file of await htmlFiles(out)){
+  const html=await readFile(file,'utf8');assert.ok(!html.includes('https://odiobill.github.io'));assert.ok(!html.includes('href="/lorecrew/'));assert.ok(!html.includes('src="/lorecrew/'));
+ }
+ assert.ok((await readFile(join(out,'sitemap.xml'),'utf8')).includes('https://lorecrew.dev/docs/projects/'));
+ assert.ok((await readFile(join(out,'robots.txt'),'utf8')).includes('https://lorecrew.dev/sitemap.xml'));
+ assert.ok(JSON.parse(await readFile(join(out,'search-index.json'),'utf8')).every(doc=>doc.url.startsWith('/docs/')));
+});

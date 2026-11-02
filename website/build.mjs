@@ -6,7 +6,7 @@ import publicFiles from '../packaging/public-files.json' with {type:'json'};
 import {normalizeBase,guidePage,escape} from './lib/render.mjs';
 import {home,docsHome,notFound} from './lib/pages.mjs';
 import {checkPublic} from '../packaging/check-public.mjs';
-const site=dirname(fileURLToPath(import.meta.url)),repo=dirname(site),args=process.argv.slice(2),options={base:'/lorecrew/',origin:'https://odiobill.github.io',out:join(site,'dist')};
+const site=dirname(fileURLToPath(import.meta.url)),repo=dirname(site),args=process.argv.slice(2),options={base:'/',origin:'https://lorecrew.dev',out:join(site,'dist')};
 try{
  for(let i=0;i<args.length;i+=2){if(!['--base','--origin','--out'].includes(args[i])||!args[i+1])throw Error('Usage: build.mjs [--base PATH] [--origin URL] [--out DIRECTORY]');options[args[i].slice(2)]=args[i+1];}
  const base=normalizeBase(options.base),origin=new URL(options.origin);if(!['http:','https:'].includes(origin.protocol)||origin.username||origin.password||origin.pathname!=='/'||origin.search||origin.hash)throw Error('UNSAFE_ORIGIN');
