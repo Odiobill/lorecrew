@@ -29,3 +29,17 @@ The Hono service serves the built React/Vite PWA and versioned HTTP/JSON API. Se
 The browser caches allowlisted static assets, not private transcripts or API responses. It does not queue offline mutations. UI update activation and draft recovery are deliberate. Closing the browser does not stop host execution.
 
 No mandatory central Lorecrew coordinator, external SQL server, vector server or separate queue service is required. Optional deployment and future connectors are separate concerns. Read [configuration](configuration.md), [multiple machines](multi-device.md) and [security](security.md) before production use.
+
+## Foundations and inspiration
+
+### WikiSkill
+
+[WikiSkill: Compiling Agent Experience into Persistent Knowledge for Skill Evolution](https://arxiv.org/abs/2608.27454), by Tang et al. (2026), is a research inspiration for Lorecrew's learning design. The paper separates raw experience, accumulated knowledge and reusable skills, with a persistent wiki supporting later skill evolution.
+
+Lorecrew adapts this separation to durable conversations and project teamwork through source-linked lessons, context-specific evidence and deliberate skill activation. These are Lorecrew-specific adaptations; their behavior and validation are defined by Lorecrew's own implementation and recorded checks.
+
+### Open Knowledge Format
+
+The vault uses [Open Knowledge Format (OKF) v0.2](https://github.com/GoogleCloudPlatform/open-knowledge-format/blob/main/SPEC.md) conventions for Markdown concepts with YAML frontmatter, provenance and verification metadata, and linked indexes. The root index declares `okf_version: "0.2"`.
+
+Lorecrew extends these conventions with its own entity IDs, skill scopes and evidence semantics. Its `lorecrew` metadata namespace carries application-specific details. Private execution records and credentials remain separate from the portable vault.

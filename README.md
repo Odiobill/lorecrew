@@ -51,6 +51,13 @@ Lorecrew is a trusted, single-owner application. Agents run with the host user's
 | [Architecture](docs/architecture.md) | Pi Durable, the vault, local state and public API |
 | [Troubleshooting](docs/troubleshooting.md) | Practical recovery and diagnostic guidance |
 
+## Foundations and inspiration
+
+- [WikiSkill](https://arxiv.org/abs/2608.27454) inspires the separation of agent experience, persistent knowledge and reusable skills.
+- [Open Knowledge Format (OKF) v0.2](https://github.com/GoogleCloudPlatform/open-knowledge-format/blob/main/SPEC.md) provides conventions for readable Markdown knowledge with structured metadata.
+
+Lorecrew adapts these foundations for durable local agents and project teamwork. See the [architecture guide](docs/architecture.md#foundations-and-inspiration) for the relationship and Lorecrew-specific extensions.
+
 ## Development
 
 See [CONTRIBUTING](CONTRIBUTING.md) for development, tests and the static website. Please [report vulnerabilities privately](SECURITY.md) and keep credentials, transcripts and private vault content out of public issues.
