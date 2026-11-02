@@ -1,0 +1,21 @@
+node_modules/
+dist/
+coverage/
+.tools/
+.lorecrew/
+state/
+.env
+.env.*
+*.sqlite
+*.sqlite-*
+providers.json
+*.pem
+*.key
+
+test-results/
+playwright-report/
+
+# Private authoring, validation output and website build
+.superpowers/
+.artifacts/
+website/dist/

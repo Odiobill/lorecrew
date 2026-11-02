@@ -1,0 +1,7 @@
+import {scriptedGitHub,sourceText,referenceText} from './scripted.js';
+import type {GitHubReader} from '../../../src/skills/import/github.js';
+/** Invented repository text only. No outbound access, credentials or executable download. */
+export function skillImportScenario(){let updated=false;const first=scriptedGitHub(),second=scriptedGitHub({'odd-folder/SKILL.md':sourceText.replace('Review carefully','Review carefully, upstream revision 2'),'odd-folder/references/index.md':'Updated upstream reference, version 2.','odd-folder/scripts/check.sh':'#!/bin/sh\nprintf still-never-execute'},{commit:'c'.repeat(40),tree:'d'.repeat(40)}),multiple=scriptedGitHub({'one/SKILL.md':sourceText,'two/SKILL.md':sourceText}),unsupported=scriptedGitHub({'blocked/SKILL.md':sourceText,'blocked/references/index.md':referenceText,'blocked/image.png':'\0binary'});
+ const transport:GitHubReader={async get(path,signal){if(path.startsWith('/repos/example/multiple'))return multiple.get(path.replace('/example/multiple','/example/tools'),signal);if(path.startsWith('/repos/example/unsupported'))return unsupported.get(path.replace('/example/unsupported','/example/tools'),signal);if(path.includes('/commits/upstream-v2'))return second.get(path,signal);if(path.includes('/commits/'))return (updated?second:first).get(path,signal);if(path.includes('/git/')){try{return await first.get(path,signal);}catch{return second.get(path,signal);}}return first.get(path,signal);}};
+ return {...transport,advance(){updated=true;}};
+}

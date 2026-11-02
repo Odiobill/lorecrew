@@ -1,0 +1,124 @@
+import { afterEach, expect, it } from 'vitest';
+import { cp, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { gitVaultFixture } from '../helpers/git-vault.js';
+import { ensureLocalAuthority } from '../../src/projects/authority-domain.js';
+import { initFleet, openOwnership } from '../../src/projects/ownership.js';
+import { WorkspaceManager } from '../../src/workspaces/manager.js';
+import { ProcessSupervisor } from '../../src/workspaces/processes.js';
+import { openVault } from '../../src/vault/write.js';
+import { openRuntime } from '../../src/runtime/pi-host.js';
+import { scriptedProvider } from '../helpers/scripted-provider.js';
+import { createApi } from '../../src/api/app.js';
+import { openBrowserSessions } from '../../src/auth/sessions.js';
+import { subjectHash } from '../../src/learning/hash.js';
+import { openWorkloadOwnership } from '../../src/projects/workload-grants.js';
+import { Value } from 'typebox/value';
+import { SessionSnapshotSchema } from '../../src/api/schemas.js';
+import { publicSnapshot } from '../../src/api/routes.js';
+
+const cleanup:Array<()=>Promise<void>>=[];
+afterEach(async()=>{for(const close of cleanup.splice(0).reverse())await close();});
+const origin='http://localhost';
+const doc=(metadata:object,body:string)=>`---\n${JSON.stringify(metadata)}\n---\n${body}\n`;
+async function fixture(){
+ const native=await gitVaultFixture();cleanup.push(native.close);await ensureLocalAuthority(native.ctx,native.identity,'knowledge-api');const remote=(await native.ctx.store.read<{remote:string}>('fleet','assignments'))!.remote;await native.git.run(native.ctx.vaultDir,['remote','add','origin',remote]);const f={a:{ctx:native.ctx,git:native.git}};await initFleet(f.a.ctx,f.a.git,'origin');
+ await cp('tests/fixtures/vault/agents',join(f.a.ctx.vaultDir,'agents'),{recursive:true});
+ const agentPath=join(f.a.ctx.vaultDir,'agents/ada.md');await writeFile(agentPath,(await readFile(agentPath,'utf8')).replaceAll('local-openai','scripted').replaceAll('coding-model','test-model'));
+ const ctx=f.a.ctx,vault=openVault(ctx),ownership=openOwnership(ctx,f.a.git,'origin'),workspaces=new WorkspaceManager(ctx);
+ const runtime=await openRuntime({ctx,vault,ownership,workspaces,supervisor:new ProcessSupervisor(ctx),models:scriptedProvider().models,resume:false});cleanup.push(()=>runtime.close());
+ const auth=openBrowserSessions(ctx),secret=await auth.issueBootstrap();const app=createApi({ctx,vault,runtime,team:runtime.team,ownership,workspaces,auth,publicOrigin:origin});
+ const login=await app.request('/api/v1/auth/login',{method:'POST',headers:{origin,'content-type':'application/json'},body:JSON.stringify({secret})});
+ const cookie=login.headers.get('set-cookie')!.split(';')[0]!;const csrf=(await login.json() as {csrfToken:string;id:string});
+ const headers={cookie,origin,'x-csrf-token':csrf.csrfToken,'content-type':'application/json'};
+ const get=(path:string)=>app.request('/api/v1'+path,{headers:{cookie}});
+ const post=(path:string,body:unknown,key:string)=>app.request('/api/v1'+path,{method:'POST',headers:{...headers,'idempotency-key':key},body:JSON.stringify(body)});
+ return {ctx,vault,runtime,app,get,post,headers,cookie,csrf,git:f.a.git};
+}
+it('searches and inspects exact applicability, contradictory evidence, source paths and unavailable artifacts',async()=>{
+ const f=await fixture();await f.vault.propose({id:'task-source',path:'history/task.md',expectedRevision:null,actor:'user:test',content:doc({type:'History',title:'Source task'},'# Source task')});
+ await f.vault.propose({id:'lesson',path:'lessons/compat.md',expectedRevision:null,actor:'user:test',content:doc({type:'Lesson',title:'Compatibility remedy',description:'Pin the dependency',claims:['remedy'],applicability:{framework:'sample',version:'2'},sourcePaths:['history/task.md','local/artifact.md']},'# Remedy\nPin the dependency.\n\n[Test evidence](../evidence/executions/check.md)\n<script>alert(1)</script>')});
+ const lesson=await f.vault.read('lessons/compat.md');const binding={path:lesson.path,revision:lesson.revision,subjectHash:subjectHash(lesson)};
+ await f.ctx.store.transact(tx=>tx.put('learning-execution','pass',{id:'pass',sessionId:'session',command:'node --test',exitCode:0,output:'ok',at:'2026-10-23T10:00:00.000Z',localArtifact:true,subjects:[binding]}));
+ await f.runtime.learning.contributeEvidence({id:'pass',subjectId:lesson.path,subjectHash:binding.subjectHash,claimIds:['remedy'],context:{framework:'sample',version:'2'},kind:'test',receiptIds:['pass'],sessionId:'session'});
+ await f.ctx.store.transact(tx=>tx.put('learning-execution','fail',{id:'fail',sessionId:'session',command:'node --test',exitCode:1,output:'regression',at:'2026-10-23T10:01:00.000Z',localArtifact:true,subjects:[binding]}));
+ await f.runtime.learning.contributeEvidence({id:'fail',subjectId:lesson.path,subjectHash:binding.subjectHash,claimIds:['remedy'],context:{framework:'sample',version:'2'},kind:'reuse',receiptIds:['fail'],sessionId:'session'});
+ const page=await (await f.get('/knowledge/search?q=Compatibility&framework=sample&version=2&limit=1')).json() as any;
+ expect(page.items[0]).toMatchObject({path:lesson.path,revision:lesson.revision,evidenceState:'contested',applicability:{framework:'sample',version:'2'}});
+ const response=await f.get('/knowledge/document?path=lessons%2Fcompat.md');expect(response.status).toBe(200);
+ const detail=await response.json() as any;expect(detail.evidence.map((item:any)=>item.outcome).sort()).toEqual(['fail','pass']);expect(detail.evidence[0].claimIds).toEqual(['remedy']);expect(detail.sources).toEqual(expect.arrayContaining([expect.objectContaining({path:'history/task.md',available:true}),expect.objectContaining({path:'local/artifact.md',available:false})]));
+ expect(detail.body).toContain('<script>');expect((await f.get('/knowledge/document?path=..%2Fsecret.md')).status).toBe(409);
+});
+it('separates active and candidate skills, rejects spoofed activation and stale revisions, and preserves explicit actor',async()=>{
+ const f=await fixture();const metadata={type:'Skill',title:'Repair',description:'Repair safely',lorecrew:{skill:{schemaVersion:1,name:'repair',scope:'global',status:'active',resources:[]}}};
+ const active=await f.vault.propose({id:'active',path:'skills/repair.md',expectedRevision:null,actor:'user:test',content:doc(metadata,'old safe')});
+ await f.vault.propose({id:'candidate',path:'skills/candidate.md',expectedRevision:null,actor:'user:test',content:doc({...metadata,lorecrew:{skill:{...metadata.lorecrew.skill,status:'candidate'}}},'new safe')});
+ const proposal={id:'repair',qualifiedId:'global/repair',baseRevision:active.revision,candidatePath:'skills/candidate.md',lessonPaths:[],checks:[],expectedImprovement:'repair'};
+ const session=await f.runtime.createSession({requestId:'curator-proposal',agentId:'agent-ada'});await f.runtime.skills.proposeSkill({proposal,sessionId:session.id});
+ const listed=await (await f.get('/skills?limit=1')).json() as any;expect(listed.items).toHaveLength(1);expect(listed.nextCursor).toBeTruthy();const second=await (await f.get('/skills?limit=1&cursor='+encodeURIComponent(listed.nextCursor))).json() as any;
+ expect([listed.items[0].status,second.items[0].status].sort()).toEqual(['active','candidate']);
+ const wrong={proposalId:'repair',expectedActiveRevision:'0'.repeat(64),mode:'explicit_unvalidated'};
+ expect((await f.post('/skills/activate',wrong,'wrong')).status).toBe(409);
+ expect((await f.post('/skills/activate',{...wrong,expectedActiveRevision:active.revision,mode:'validated',sessionId:session.id},'spoof-mode')).status).toBe(400);
+ expect((await f.post('/skills/activate',{...wrong,expectedActiveRevision:active.revision,userId:'agent:forged'},'spoof-user')).status).toBe(400);
+ const response=await f.post('/skills/activate',{...wrong,expectedActiveRevision:active.revision},'activate');expect(response.status).toBe(200);
+ const promoted=await f.vault.read('skills/repair.md');expect(promoted.metadata.lorecrew).toMatchObject({skill:{activation:{actor:`user:${f.csrf.id}`,mode:'explicit_unvalidated'}}});
+ expect((await f.post('/skills/activate',{...wrong,expectedActiveRevision:active.revision},'activate')).status).toBe(200);
+});
+it('derives a load pin from the real session and replays accepted receipts after cancellation',async()=>{
+ const f=await fixture();await f.vault.propose({id:'active',path:'skills/repair.md',expectedRevision:null,actor:'user:test',content:doc({type:'Skill',title:'Repair',description:'Repair safely',lorecrew:{skill:{schemaVersion:1,name:'repair',scope:'global',status:'active',resources:[]}}},'safe body')});
+ const session=await f.runtime.createSession({requestId:'reader',agentId:'agent-ada'});
+ const input={sessionId:session.id,qualifiedId:'global/repair'};
+ expect((await f.post('/skills/load',{...input,taskId:'forged',agentId:'forged'},'forged')).status).toBe(400);
+ const first=await f.post('/skills/load',input,'load');expect(first.status).toBe(200);const loaded=await first.json() as {revision:string};
+ expect((await f.ctx.store.list<{sessionId:string;taskId:string}>('skill-pin'))[0]).toMatchObject({sessionId:session.id,taskId:session.id});
+ await f.ctx.store.transact(tx=>{const current=tx.get<import('../../src/runtime/types.js').SessionRecord>('runtime-session',session.id)!;tx.put('runtime-session',session.id,{...current,cancelled:true});});
+ expect(await (await f.post('/skills/load',input,'load')).json()).toMatchObject({revision:loaded.revision});
+ expect((await f.post('/skills/load',input,'new-after-cancel')).status).toBe(409);
+ const openapi=await (await f.get('/openapi.json')).json() as any;expect(openapi.paths['/api/v1/skills/load'].post.parameters).toEqual(expect.arrayContaining([expect.objectContaining({name:'Idempotency-Key'})]));
+});
+it('inspects the actual old task pin and lifecycle metadata beyond catalog and proposal page boundaries',async()=>{
+ const f=await fixture();const metadata={type:'Skill',title:'Repair',description:'Repair safely',lorecrew:{skill:{schemaVersion:1,name:'repair',scope:'global',status:'active',resources:[]}}};
+ const active=await f.vault.propose({id:'active',path:'skills/repair.md',expectedRevision:null,actor:'user:test',content:doc(metadata,'Old remedy')});
+ const session=await f.runtime.createSession({requestId:'pin-reader',agentId:'agent-ada'});
+ expect((await f.post('/skills/load',{sessionId:session.id,qualifiedId:'global/repair'},'pin-old')).status).toBe(200);
+ // These unrelated rows exercise pagination, not durable publication. Seed their
+ // valid Markdown directly; the subjects and lifecycle actions still use real services.
+ await mkdir(join(f.ctx.vaultDir,'learning'),{recursive:true});
+ await Promise.all(Array.from({length:101},(_,i)=>writeFile(join(f.ctx.vaultDir,`learning/00-filler-${String(i).padStart(3,'0')}.md`),doc({type:'LearningProposal',title:`Filler ${i}`},'Pending'))));
+ await f.vault.propose({id:'candidate',path:'skills/candidate.md',expectedRevision:null,actor:'user:test',content:doc({...metadata,lorecrew:{skill:{...metadata.lorecrew.skill,status:'candidate'}}},'New remedy')});
+ const curator=await f.runtime.createSession({requestId:'proposal',agentId:'agent-ada'});
+ await f.runtime.skills.proposeSkill({sessionId:curator.id,proposal:{id:'repair',qualifiedId:'global/repair',baseRevision:active.revision,candidatePath:'skills/candidate.md',lessonPaths:[],checks:[],expectedImprovement:'repair'}});
+ const query=`/skills/inspection?qualifiedId=global%2Frepair&sessionId=${encodeURIComponent(session.id)}&candidatePath=skills%2Fcandidate.md`;
+ const before=await (await f.get(query)).json() as any;
+ expect(before.pin).toMatchObject({revision:active.revision,taskId:session.id});expect(before.activation).toMatchObject({proposalId:'repair',baseRevision:active.revision});
+ expect(await f.ctx.store.list('skill-pin')).toHaveLength(1);expect(await f.ctx.store.list('skill-load')).toHaveLength(1);
+ expect((await (await f.get('/learning/proposals?limit=100')).json() as any).items).toHaveLength(100);
+ await f.runtime.skills.activateUnvalidated({proposalId:'repair',expectedActiveRevision:active.revision,userId:'review-fixture'});
+ const catalog=await (await f.get('/skills?limit=1')).json() as any;expect(catalog.items).toHaveLength(1);expect(catalog.nextCursor).toBeTruthy();
+ const after=await (await f.get(query)).json() as any;
+ expect(after.items).toEqual(expect.arrayContaining([expect.objectContaining({status:'active'})]));expect(after.history).toEqual(expect.arrayContaining([expect.objectContaining({status:'history',revision:active.revision})]));
+ expect(after.pin).toMatchObject({revision:active.revision,taskId:session.id});
+ const loaded=await (await f.post('/skills/load',{sessionId:session.id,qualifiedId:'global/repair'},'load-again')).json() as any;
+ expect(loaded.revision).toBe(active.revision);expect(after.items.find((item:any)=>item.status==='active').revision).not.toBe(active.revision);
+});
+it('keeps review-only passing and unfavorable records separate from execution validation',async()=>{
+ const f=await fixture();await f.vault.propose({id:'review-lesson',path:'lessons/review-only.md',expectedRevision:null,actor:'user:test',content:doc({type:'Lesson',title:'Review only',claims:['remedy','version'],applicability:{version:'2'}},'Review only')});const lesson=await f.vault.read('lessons/review-only.md');
+ for(const [id,outcome,claimIds] of [['favorable','pass',['remedy']],['unfavorable','fail',['version']]] as const)await f.runtime.learning.recordEvidence({id,subjectId:lesson.path,subjectHash:subjectHash(lesson),claimIds:[...claimIds],context:{version:'2'},kind:'review',outcome,executor:'user:reviewer',at:'2026-10-23T10:00:00.000Z',artifactPaths:[]});
+ const detail=await (await f.get('/knowledge/document?path=lessons%2Freview-only.md')).json() as any;
+ expect(detail.evidenceState).toBe('tentative');expect(detail.evidence).toEqual(expect.arrayContaining([expect.objectContaining({kind:'review',outcome:'pass',claimIds:['remedy']}),expect.objectContaining({kind:'review',outcome:'fail',claimIds:['version']})]));
+});
+it('retains a rejected evaluation with curator progress and review details',async()=>{
+ const f=await fixture();const grant=await openWorkloadOwnership(f.ctx,f.git,'origin').claim('curator','assign');await f.runtime.curator.assign({agentId:'agent-ada',ownerId:grant.ownerId,generation:1});
+ const session=await f.runtime.createSession({requestId:'curator',agentId:'agent-ada',background:true,workload:{workloadId:'curator',generation:1}});
+ const metadata={type:'Skill',title:'Repair',description:'Repair safely',lorecrew:{skill:{schemaVersion:1,name:'repair',scope:'global',status:'active',resources:[]}}};
+ const active=await f.vault.propose({id:'active',path:'skills/repair.md',expectedRevision:null,actor:'user:test',content:doc(metadata,'old remedy')});
+ await f.vault.propose({id:'candidate',path:'skills/candidate.md',expectedRevision:null,actor:'user:test',content:doc({...metadata,lorecrew:{skill:{...metadata.lorecrew.skill,status:'candidate'}}},'candidate remedy')});
+ await f.runtime.skills.proposeSkill({sessionId:session.id,proposal:{id:'rejected',qualifiedId:'global/repair',baseRevision:active.revision,candidatePath:'skills/candidate.md',lessonPaths:[],checks:[],expectedImprovement:'repair'}});
+ const evaluation=await f.runtime.skills.evaluateProposal({proposalId:'rejected',sessionId:session.id});expect(evaluation.eligible).toBe(false);
+ const publicSession=publicSnapshot(await f.runtime.snapshot(session.id));
+ expect(publicSession.session).toMatchObject({workloadId:'curator'});expect(Value.Check(SessionSnapshotSchema,publicSession)).toBe(true);
+ expect((await f.get('/snapshot')).status).toBe(200);
+ const proposals=await (await f.get('/learning/proposals')).json() as any;expect(proposals.items).toEqual(expect.arrayContaining([expect.objectContaining({type:'SkillProposal',state:'rejected'})]));
+ const reviews=await (await f.get('/learning/reviews')).json() as any;expect(reviews.items).toEqual(expect.arrayContaining([expect.objectContaining({type:'SkillEvaluation',state:'rejected'})]));expect(reviews.curator).toMatchObject({work:[],errors:[],usage:[]});
+});

@@ -1,0 +1,7 @@
+# Set a real hostname and configure Lorecrew serve --public-origin https://crew.example.com.
+# Keep Lorecrew bound to loopback. Caddy handles TLS; Lorecrew retains authentication.
+crew.example.com {
+    reverse_proxy 127.0.0.1:4317 {
+        flush_interval -1
+    }
+}

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Optional launchd user agent; replace absolute paths and XML-escape special characters.
+     No shell profile is imported. Supply provider variables explicitly in EnvironmentVariables.
+     macOS process quiescence is currently unavailable; see compatibility.md. -->
+<plist version="1.0"><dict>
+  <key>Label</key><string>local.lorecrew</string>
+  <key>ProgramArguments</key><array>
+    <string>/ABSOLUTE/node24/bin/node</string>
+    <string>/ABSOLUTE/node_modules/lorecrew/dist/cli.js</string>
+    <string>serve</string><string>--state-dir</string><string>/ABSOLUTE/lorecrew-state</string>
+    <string>--host</string><string>127.0.0.1</string><string>--port</string><string>4317</string>
+  </array>
+  <key>EnvironmentVariables</key><dict><key>PATH</key><string>/ABSOLUTE/node24/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string></dict>
+  <key>WorkingDirectory</key><string>/</string>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
+  <key>StandardOutPath</key><string>/ABSOLUTE/lorecrew-logs/output.log</string>
+  <key>StandardErrorPath</key><string>/ABSOLUTE/lorecrew-logs/error.log</string>
+</dict></plist>

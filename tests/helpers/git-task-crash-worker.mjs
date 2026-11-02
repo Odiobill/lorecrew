@@ -1,0 +1,7 @@
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import {join} from 'node:path';
+import {gitTaskFixture} from './git-task-fixture.ts';
+const [root,action,phase]=process.argv.slice(2);const f=await gitTaskFixture(root,'single',action==='pause'?phase:undefined);
+try{const task=await f.run();for(let n=0;n<300;n++){const state=(await f.runtime.team.getTask(task.id)).state;if(['completed','failed','cancelled'].includes(state))break;const snapshot=await f.runtime.snapshot(task.executingSessionId);if(snapshot.blockedReason)break;await new Promise(r=>setTimeout(r,10));}
+const workspaces=await f.ctx.store.list('workspace');assert.ok(workspaces.length>0);assert.ok(workspaces.every(w=>w.git&&w.path!==f.project));assert.equal(new Set(workspaces.map(w=>w.path)).size,workspaces.length);for(const workspace of workspaces){const text=await readFile(join(workspace.path,'order'),'utf8').catch(e=>{if(e.code==='ENOENT')return '';throw e;});const lines=text.trim().split('\n').filter(Boolean);assert.equal(new Set(lines).size,lines.length,'No completed shell effect may replay');}const processes=await f.ctx.store.list('host-process');assert.equal(new Set(processes.map(p=>p.id)).size,processes.length);for(const kind of ['plain-handoff','plain-execution-slot','plain-boundary'])assert.deepEqual(await f.ctx.store.list(kind),[]);console.log(JSON.stringify({ok:true,phase,state:(await f.runtime.team.getTask(task.id)).state,processes:processes.length,workspaces:workspaces.length}));}finally{await f.close();}

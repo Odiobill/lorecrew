@@ -1,0 +1,14 @@
+import {expect,it} from 'vitest';
+import {spawn} from 'node:child_process';
+import {readFile} from 'node:fs/promises';
+import {join,resolve} from 'node:path';
+import {legacyRepositoryFixture} from '../helpers/legacy-repository.js';
+import {openInstance} from '../../src/instance/open.js';
+import {openRepositories} from '../../src/repositories/service.js';
+import {GitClient} from '../../src/git/client.js';
+import {openRepositoryMigration} from '../../src/repositories/migration.js';
+import {readStoppedExecutionProof} from '../../src/runtime/stopped-proof.js';
+import {hash} from '../../src/repositories/inspect.js';
+for(const phase of ['prepared','baseline','receipt','format'])it(`resumes after actual process death at migration ${phase} without replay`,async()=>{const f=await legacyRepositoryFixture();let resumed:Awaited<ReturnType<typeof openInstance>>|undefined;try{const migration=openRepositoryMigration({...f,proof:()=>readStoppedExecutionProof(f.ctx)});const view=await migration.inspect();const input={expectedInventory:view.revision,selections:view.repositories.map(repo=>({repo,files:repo.kind==='vault'?[{path:'index.md',hash:hash('---\nokf_version: "0.2"\n---\n# Legacy\n')}]:[{path:'work.md',hash:hash('retained\n')}]}))};await f.ctx.close();const child=spawn(process.execPath,['--import','tsx',resolve('tests/helpers/migration-worker.mjs'),f.paths.stateDir,f.paths.vaultDir,phase,JSON.stringify(input)],{stdio:['ignore','pipe','pipe','ipc'],env:{...process.env,LORECREW_AUTH_FILE:join(f.root,'disposable-auth.json')}});let stderr='';child.stderr!.on('data',b=>stderr+=b);const exit=new Promise<void>((done,reject)=>{child.once('error',reject);child.once('close',()=>done());});const reached=await new Promise<unknown>((done,reject)=>{child.once('message',done);child.once('exit',()=>reject(Error('worker exited before barrier: '+stderr)));});expect(reached).toEqual({phase});child.kill('SIGKILL');await exit;
+ resumed=await openInstance(f.paths);const service=openRepositoryMigration({ctx:resumed,repositories:openRepositories({state:resumed,git:new GitClient()}),proof:()=>readStoppedExecutionProof(resumed!)});const prepared=await service.prepare(input,'crash-convert');const baselines=await service.createBaselines(prepared.id);await service.finish({migrationId:prepared.id,baselines},'crash-finish');expect(resumed.store.repositoryFormat()).toBe(2);expect(baselines).toHaveLength(2);expect(await readFile(join(f.project,'unselected'),'utf8')).toBe('user');await expect(readFile(join(f.paths.stateDir,'pi.sqlite'))).rejects.toMatchObject({code:'ENOENT'});const git=new GitClient();for(const repo of view.repositories)expect((await git.run(repo.path,['rev-list','--count','HEAD'])).stdout.trim()).toBe('1');
+ }finally{await resumed?.close();await f.close();}},20000);

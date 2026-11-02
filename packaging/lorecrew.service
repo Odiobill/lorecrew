@@ -1,0 +1,19 @@
+# Optional systemd user unit. Replace every /ABSOLUTE placeholder before use.
+# Paths inside quotes support spaces; literal percent signs must be escaped as %%.
+[Unit]
+Description=Lorecrew local instance
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/
+ExecStart="/ABSOLUTE/node24/bin/node" "/ABSOLUTE/node_modules/lorecrew/dist/cli.js" serve --state-dir "/ABSOLUTE/lorecrew-state" --host 127.0.0.1 --port 4317
+Environment="PATH=/ABSOLUTE/node24/bin:/usr/local/bin:/usr/bin:/bin"
+EnvironmentFile="/ABSOLUTE/lorecrew-environment"
+Restart=on-failure
+KillMode=control-group
+TimeoutStopSec=120
+UMask=0077
+
+[Install]
+WantedBy=default.target

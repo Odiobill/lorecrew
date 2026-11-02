@@ -1,0 +1,3 @@
+import type {StateContext} from '../instance/state.js';
+/** The old receipts remain immutable migration input; this module never invokes the old writer. */
+export async function inspectLegacySync(ctx:StateContext){const kinds=['sync-publication','sync-integrated','sync-captured','sync-conflict','sync-conflicts','sync-observed','sync-recovery','sync-replacements','export-batch','export-entry','export-cursor','ui-inbox-seen','inbox-result','inbox-result-version','inbox-report-request'];const records:Record<string,unknown[]>={};for(const kind of kinds)records[kind]=await ctx.store.list(kind);return records;}

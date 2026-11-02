@@ -1,0 +1,34 @@
+import {expect,it} from 'vitest';
+import {writeFile,rename} from 'node:fs/promises';
+import {join} from 'node:path';
+import {gitVaultFixture} from '../helpers/git-vault.js';
+import {scriptedProvider,fauxAssistantMessage} from '../helpers/scripted-provider.js';
+import {openLocalCommits} from '../../src/sync/local-commits.js';
+import {watchVault} from '../../src/sync/watch.js';
+import {openExporter} from '../../src/export/outbox.js';
+import {openRuntime} from '../../src/runtime/pi-host.js';
+import {WorkspaceManager} from '../../src/workspaces/manager.js';
+import {ProcessSupervisor} from '../../src/workspaces/processes.js';
+import type {PublicationIntent,Exporter} from '../../src/export/types.js';
+import type {CapturedBatch} from '../../src/sync/watch.js';
+import {preReviewPublishedAcknowledgement} from '../fixtures/git-centric-pre-review/published-ack.js';
+
+for(const kind of ['capture','export'] as const)for(const boundary of ['after-published','before-batch-ack'] as const)it(`reconciles actual ${kind} publication acknowledgements after ${boundary} and original-path reopen`,async()=>{
+ const f=await gitVaultFixture(),provider=scriptedProvider();let runtime:Awaited<ReturnType<typeof openRuntime>>|undefined;
+ try{
+  let pushes=0,commits=0;const native=f.git.run.bind(f.git);f.git.run=(cwd,args,options)=>{if(args.includes('push'))pushes++;if(args.includes('commit-tree'))commits++;return native(cwd,args,options);};
+  const createRuntime=(resume:boolean)=>openRuntime({ctx:f.ctx,vault:f.vault,ownership:f.ownership,workspaces:new WorkspaceManager(f.ctx),supervisor:new ProcessSupervisor(f.ctx),models:provider.models,resume});
+  if(kind==='export'){
+   await f.vault.propose({id:'agent',path:'agents/ack.md',expectedRevision:null,actor:'user:fixture',content:'---\n'+JSON.stringify({type:'Agent',lorecrew:{id:'ack',name:'Ack',personality:'Direct',responsibilities:[],groups:[],model:{provider:'scripted',modelId:'test-model'}}})+'\n---\nRecord the explicit message.\n'});
+   runtime=await createRuntime(true);provider.faux.setResponses([fauxAssistantMessage('Actual completed history')]);const session=await runtime.createSession({requestId:'ack-session',agentId:'ack'});await runtime.submit({sessionId:session.id,requestId:'ack-message',text:'Actual exporter history'});await expect.poll(async()=>(await runtime!.snapshot(session.id)).status).toBe('completed');await expect.poll(async()=>(await runtime!.attentionState(session.id)).pendingWork).toBe(false);
+  }else{const watcher=watchVault({ctx:f.ctx,vault:f.vault,onBatch:async()=>{},debounceMs:100000,rescanMs:100000});try{await watcher.ready;await writeFile(join(f.path,'note.md'),'---\ntype: Note\n---\nActual captured bytes\n');await watcher.flush();}finally{await watcher.close();}}
+  const exporter=():Exporter=>kind==='export'?openExporter({ctx:f.ctx,vault:f.vault,runtime:runtime!,baseRevision:()=>f.gitAt(['rev-parse','HEAD'])}):{flush:async()=>[],acknowledge:async()=>{throw Error('Captured batches do not use exporter acknowledgement');}};
+  let exports=exporter(),worker=openLocalCommits({ctx:f.ctx,vault:f.vault,repositories:f.repositories,git:f.git,exporter:exports});const captured=await worker.capture();expect(captured.length).toBeGreaterThan(0);await worker.integrate();const targetId=kind==='export'?(await f.ctx.store.list<PublicationIntent>('export-batch')).find(b=>b.batch.files.some(file=>file.path.startsWith('history/')))?.batch.id:(await f.ctx.store.list<CapturedBatch>('sync-captured')).find(b=>b.batch.files.some(file=>file.path==='note.md'))?.batch.id;expect(targetId).toBeTruthy();
+  const remote=join(f.root,'published.git');expect((await f.git.run(f.root,['init','--bare','--template=','--initial-branch=main',remote])).exitCode).toBe(0);await f.gitAt(['remote','add','origin',remote]);const repo={kind:'vault' as const,id:f.identity.vaultId,path:f.path},target=(await f.repositories.inspect(f.path)).target!,head=await f.gitAt(['rev-parse','HEAD']),input={repo,target,refs:[{localRef:'refs/heads/main',commit:head,remoteRef:target.ref}]};
+  await rename(remote,remote+'.offline');const unconfirmed=await f.repositories.publish(input,'actual-publication');expect(unconfirmed.confirmed).toBe(false);await worker.confirmPublished(unconfirmed);expect(await f.ctx.store.read('sync-local-commit',targetId!)).toMatchObject({published:false});await rename(remote+'.offline',remote);const receipt=await f.repositories.publish(input,'actual-publication');expect(receipt.confirmed).toBe(true);expect((await f.git.run(remote,['rev-parse','refs/heads/main'])).stdout.trim()).toBe(head);const before={pushes,commits,models:provider.faux.state.callCount};
+  const transact=f.ctx.store.transact.bind(f.ctx.store);let lose=true;
+  f.ctx.store.transact=async fn=>{let published=false;const result=await transact(tx=>fn({...tx,put(recordKind,id,value){const row=value as {acknowledged?:boolean;published?:boolean};if(lose&&boundary==='before-batch-ack'&&id===targetId&&recordKind===(kind==='export'?'export-batch':'sync-captured')&&row.acknowledged){lose=false;throw Error('interrupted original batch acknowledgement');}if(recordKind==='sync-local-commit'&&id===targetId&&row.published)published=true;tx.put(recordKind,id,value);}}));if(lose&&boundary==='after-published'&&published){lose=false;throw Error('lost published receipt before batch acknowledgement');}return result;};
+  const acknowledge=boundary==='after-published'?preReviewPublishedAcknowledgement(f.ctx,f.git,exports):worker.confirmPublished;await expect(acknowledge(receipt)).rejects.toThrow(/acknowledgement|published receipt/);if(boundary==='after-published'){expect(await f.ctx.store.read('sync-local-commit',targetId!)).toMatchObject({published:true});expect(await f.ctx.store.read(kind==='export'?'export-batch':'sync-captured',targetId!)).not.toMatchObject({acknowledged:true});}else expect(await f.ctx.store.read('sync-local-commit',targetId!)).toMatchObject({published:false});f.ctx.store.transact=transact;await runtime?.close();runtime=undefined;await f.reopen();if(kind==='export')runtime=await createRuntime(false);exports=exporter();worker=openLocalCommits({ctx:f.ctx,vault:f.vault,repositories:f.repositories,git:f.git,exporter:exports});await worker.confirmPublished(receipt);
+  expect(await f.ctx.store.read('sync-local-commit',targetId!)).toMatchObject({published:true});expect(await f.ctx.store.read(kind==='export'?'export-batch':'sync-captured',targetId!)).toMatchObject({acknowledged:true});expect(await f.ctx.store.read(kind==='export'?'export-batch-index':'sync-captured-index',targetId!)).toMatchObject({acknowledged:true});expect((await exports.flush()).map(b=>b.id)).not.toContain(targetId);await worker.confirmPublished(receipt);expect(await f.gitAt(['rev-parse','HEAD'])).toBe(head);expect({pushes,commits,models:provider.faux.state.callCount}).toEqual(before);
+ }finally{await runtime?.close();await f.close();}
+},30000);

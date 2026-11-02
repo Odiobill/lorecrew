@@ -1,0 +1,51 @@
+name: CI
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15]
+    runs-on: ${{ matrix.os }}
+    env:
+      NPM_CONFIG_UPDATE_NOTIFIER: 'false'
+      NPM_CONFIG_AUDIT: 'false'
+      NPM_CONFIG_FUND: 'false'
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm run check:public
+      - run: npm run test:site
+      - run: npm run build
+      - run: npm run check
+      - name: Linux integration suite
+        if: runner.os == 'Linux'
+        run: npm test
+      - name: macOS supported bootstrap and recovery capabilities
+        if: runner.os == 'macOS'
+        run: npm test -- tests/instance/bootstrap.test.ts tests/packaging/install.test.ts
+      - name: Inspect and install packed artifact
+        shell: bash
+        run: |
+          npm pack --dry-run --ignore-scripts --json > "$RUNNER_TEMP/lorecrew-pack-files.json"
+          npm pack --ignore-scripts --json --pack-destination "$RUNNER_TEMP" > "$RUNNER_TEMP/lorecrew-pack.json"
+          pack_name=$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))[0].filename)' "$RUNNER_TEMP/lorecrew-pack.json")
+          lorecrew_npm_cache=$(npm config get cache)
+          cp -R "$lorecrew_npm_cache" "$RUNNER_TEMP/lorecrew-install-cache"
+          LORECREW_NPM_CACHE="$RUNNER_TEMP/lorecrew-install-cache" LORECREW_PACKED_ARTIFACT="$RUNNER_TEMP/$pack_name" npm test -- tests/packaging/install.test.ts -t 'installs the actual packed artifact'
+      - name: Browser integration
+        if: matrix.os == 'ubuntu-24.04'
+        run: |
+          npx playwright install --with-deps chromium
+          npm run test:e2e
+          npm run test:site:browser

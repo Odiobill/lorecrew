@@ -1,0 +1,10 @@
+import {openInstance} from '../../src/instance/open.ts';
+import {GitClient} from '../../src/git/client.ts';
+import {openRepositories} from '../../src/repositories/service.ts';
+import {openRepositoryMigration} from '../../src/repositories/migration.ts';
+import {readStoppedExecutionProof} from '../../src/runtime/stopped-proof.ts';
+const [stateDir,vaultDir,phase,inputText]=process.argv.slice(2);const input=JSON.parse(inputText);const ctx=await openInstance({stateDir,vaultDir});
+let held=false;const wait=async()=>{if(held)return;held=true;process.send?.({phase});await new Promise(()=>{});};
+const transact=ctx.store.transact.bind(ctx.store);ctx.store.transact=async fn=>{const result=await transact(fn);const records=await ctx.store.list('repository-migration');if(records.some(r=>phase==='prepared'?r.state==='prepared':phase==='baseline'?r.baselines.length===1:phase==='receipt'?r.state==='baselines_verified':false))await wait();return result;};
+const complete=ctx.store.completeRepositoryMigration.bind(ctx.store);ctx.store.completeRepositoryMigration=async id=>{await complete(id);if(phase==='format')await wait();};
+const migration=openRepositoryMigration({ctx,repositories:openRepositories({state:ctx,git:new GitClient()}),proof:()=>readStoppedExecutionProof(ctx)});const prepared=await migration.prepare(input,'crash-convert');const baselines=await migration.createBaselines(prepared.id);await migration.finish({migrationId:prepared.id,baselines},'crash-finish');await ctx.close();process.send?.({unexpected:'finished-before-barrier'});

@@ -1,0 +1,8 @@
+import type { Json } from '../contracts/base.js';
+export interface LearningEvent {id:string;taskId:string;instanceId:string;agentId:string;model:{provider:string;modelId:string};historyPaths:string[];changedCommits:string[];testReceipts:string[];outcome:Json}
+export interface ExecutionReceipt {id:string;sessionId:string;command:string;exitCode:number;output:string;at:string;localArtifact:boolean;skillCheck?:{subjectHash:string|null;subjectRevision:string|null;fixtureRevision:string;checkName:string;phase:'before'|'after'};subjects?:Array<{path:string;revision:string;subjectHash:string}>}
+export interface EvidenceRecord {id:string;subjectId:string;subjectHash:string;claimIds:string[];context:Json;kind:'test'|'reuse'|'review';outcome:'pass'|'fail'|'unknown';executor:string;at:string;artifactPaths:string[];rationale?:string}
+export interface EvidenceInput {id:string;subjectId:string;subjectHash:string;claimIds:string[];context:Json;kind:'test'|'reuse'|'review';receiptIds:string[];sessionId:string;rationale?:string}
+export interface Learning {captureLesson(event:LearningEvent):Promise<{lessonId:string;path:string}>;recordEvidence(record:EvidenceRecord):Promise<void>;contributeEvidence(input:EvidenceInput):Promise<void>;drain():Promise<void>;close():Promise<void>}
+export interface SkillProposal {id:string;qualifiedId:string;baseRevision:string|null;candidatePath:string;lessonPaths:string[];checks:Array<{name:string;command:string;fixturePath:string}>;expectedImprovement:string}
+export interface SkillEvaluation {proposalId:string;candidateHash:string;baselineRevision:string|null;checks:Array<{name:string;before:'pass'|'fail'|'unavailable';after:'pass'|'fail'|'unavailable';evidencePaths:string[]}>;improved:boolean;regressions:string[];eligible:boolean}

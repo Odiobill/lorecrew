@@ -1,0 +1,18 @@
+import { registerHooks } from 'node:module';
+registerHooks({resolve(specifier,context,next){try{return next(specifier,context);}catch(error){if(error.code==='ERR_MODULE_NOT_FOUND'&&specifier.startsWith('.')&&specifier.endsWith('.js'))return next(specifier.slice(0,-3)+'.ts',context);throw error;}}});
+const { openInstance } = await import('../../../src/instance/open.ts');
+const { openVault } = await import('../../../src/vault/write.ts');
+const { openOwnership } = await import('../../../src/projects/ownership.ts');
+const { GitClient } = await import('../../../src/git/client.ts');
+const { WorkspaceManager } = await import('../../../src/workspaces/manager.ts');
+const { ProcessSupervisor } = await import('../../../src/workspaces/processes.ts');
+const { openRuntime } = await import('../../../src/runtime/pi-host.ts');
+const { scriptedProvider, fauxAssistantMessage } = await import('../../helpers/scripted-provider.ts');
+const [stateDir,vaultDir] = process.argv.slice(2);
+const ctx=await openInstance({stateDir,vaultDir});const provider=scriptedProvider();provider.faux.setResponses([fauxAssistantMessage('Recovered once')]);
+const runtime=await openRuntime({ctx,vault:openVault(ctx),ownership:openOwnership(ctx,new GitClient(),'origin'),workspaces:new WorkspaceManager(ctx),supervisor:new ProcessSupervisor(ctx),models:provider.models});
+const session=await runtime.createSession({requestId:'crash-session',agentId:'agent-ada',projectId:'engine'});
+const original=ctx.store.transact;
+ctx.store.transact=fn=>original(tx=>fn({...tx,put(kind,id,value){if(kind==='runtime-submission'&&value.piId)process.kill(process.pid,'SIGKILL');tx.put(kind,id,value);}}));
+await runtime.submit({sessionId:session.id,requestId:'crash-submit',text:'Continue the admitted engine task'});
+setInterval(()=>{},1000);

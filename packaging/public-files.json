@@ -1,0 +1,26 @@
+{
+  "guides": [
+    "docs/getting-started.md",
+    "docs/installation.md",
+    "docs/configuration.md",
+    "docs/agents.md",
+    "docs/projects.md",
+    "docs/knowledge-and-skills.md",
+    "docs/routines.md",
+    "docs/multi-device.md",
+    "docs/backup-and-recovery.md",
+    "docs/security.md",
+    "docs/troubleshooting.md",
+    "docs/architecture.md",
+    "docs/api-and-cli.md"
+  ],
+  "siteAssets": [
+    "logo.svg",
+    "site.css",
+    "site.js",
+    "social-card.png"
+  ],
+  "sourceOnlyAssets": [
+    "social-card.svg"
+  ]
+}

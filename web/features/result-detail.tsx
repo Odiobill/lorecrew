@@ -1,0 +1,12 @@
+import {useContext,useEffect,useRef,useState} from 'react';
+import type {ApiClient} from '../api.js';
+import type {InboxResult} from '../../src/attention/types.js';
+import {Markdown} from '../components/markdown.js';
+import {ResultReadContext,useResultRead} from './use-result-read.js';
+export function ResultDetail({api,id,currentRevision,embedded=false}:{api:ApiClient;id:string;currentRevision?:string|undefined;embedded?:boolean}){
+ const [result,setResult]=useState<InboxResult>(),[error,setError]=useState(''),[reload,setReload]=useState(0),root=useRef<HTMLElement>(null),reads=useContext(ResultReadContext);
+ useEffect(()=>{let current=true;setResult(undefined);setError('');void api.operations<InboxResult>('/inbox/results/'+encodeURIComponent(id)).then(value=>{if(current)setResult(value);}).catch(e=>{if(current)setError(e instanceof Error?e.message:'Result could not be loaded');});return()=>{current=false;};},[api,id,reload]);
+ const body=result?.id===id?result:undefined;useResultRead(body,root);
+ const content=body?.content;const markdown=content&&typeof content==='object'&&!Array.isArray(content)&&Object.keys(content).length===1&&typeof content.body==='string'?content.body:undefined;
+ return <section className={embedded?'result-detail':'operations result-detail'} ref={root} aria-label={embedded?'Task result':'Result detail'}>{!embedded&&<a className="back-link" href="#inbox">Back to Inbox</a>}{error?<p role="alert">{error}<button onClick={()=>setReload(n=>n+1)}>Retry result</button></p>:body?<><h2>{body.title}</h2>{currentRevision&&currentRevision!==body.revision&&<p role="status">A newer result is available. <button onClick={()=>setReload(n=>n+1)}>Load latest result</button></p>}{markdown!==undefined?<Markdown text={markdown}/>:<pre className="outcome">{JSON.stringify(content,null,2)}</pre>}{body.sourcePaths.length>0&&<ul aria-label="Result sources">{body.sourcePaths.map(path=><li key={path}><a href={'#knowledge/'+encodeURIComponent(path)}>{path}</a></li>)}</ul>}{body.source.kind==='user_task'&&<a href={'#tasks/'+encodeURIComponent(body.source.rootTaskId)}>Open task</a>}{body.source.kind==='schedule'&&<a href="#routines">Open run history</a>}{body.source.kind==='workload'&&<a href={'#conversations/'+encodeURIComponent(body.source.sessionId)}>Open conversation</a>}{reads.error&&<p role="alert">{reads.error}<button onClick={reads.retry}>Retry saving read</button></p>}</>:<p role="status">Loading result…</p>}</section>;
+}

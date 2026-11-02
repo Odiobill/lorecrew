@@ -1,0 +1,12 @@
+import {Value} from 'typebox/value';
+import {TaskSchema} from '../../src/api/schemas.js';
+import {expect,it} from 'vitest';
+import {join} from 'node:path';
+import {gitVaultFixture} from '../helpers/git-vault.js';
+import {ensureLocalAuthority} from '../../src/projects/authority-domain.js';
+import {bindProject} from '../../src/projects/bindings.js';
+import {openRuntime} from '../../src/runtime/pi-host.js';
+import {WorkspaceManager} from '../../src/workspaces/manager.js';
+import {ProcessSupervisor} from '../../src/workspaces/processes.js';
+import {scriptedProvider} from '../helpers/scripted-provider.js';
+it('creates a native scoped task before its session exists and fences its old authority epoch',async()=>{const f=await gitVaultFixture();let runtime:Awaited<ReturnType<typeof openRuntime>>|undefined;try{const binding=await ensureLocalAuthority(f.ctx,f.identity,'owner');const path=join(f.root,'project');await f.repositories.create({repo:{kind:'project',id:'project',path},parentPath:f.root,folderName:'project',scaffold:[{path:'README.md',content:'Project'}]},'project');await f.ownership.claim({id:'project',title:'Project',repositoryKey:'fork:project'},'claim');await bindProject(f.ctx,{projectId:'project',path});await f.vault.propose({id:'agent',path:'agents/ada.md',expectedRevision:null,actor:'fixture',content:'---\n'+JSON.stringify({type:'Agent',lorecrew:{id:'ada',name:'Ada',personality:'Help carefully',responsibilities:['Coding'],groups:[],model:{provider:'scripted',modelId:'test-model'}}})+'\n---\n'});runtime=await openRuntime({ctx:f.ctx,vault:f.vault,ownership:f.ownership,workspaces:new WorkspaceManager(f.ctx),supervisor:new ProcessSupervisor(f.ctx),models:scriptedProvider().models,resume:false});const task=await runtime.team.createTask({requestId:'task',projectId:'project',leadAgentId:'ada',objective:'Inspect the project'});expect(Value.Check(TaskSchema,task)).toBe(true);expect(task).toMatchObject({authority:{domainId:binding.domainId,epoch:1}});expect(await f.ctx.store.list('runtime-session')).toHaveLength(1);await f.ctx.store.transact(tx=>tx.put('team-task',task.id,{...task,authority:{domainId:binding.domainId,epoch:0}}));await expect(runtime.team.steer({taskId:task.id,requestId:'stale',text:'Old task'})).rejects.toMatchObject({code:'AUTHORITY_RETIRED'});}finally{await runtime?.close();await f.close();}});

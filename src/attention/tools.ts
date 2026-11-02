@@ -1,0 +1,6 @@
+import { Type } from '@earendil-works/pi-ai';
+import { defineExtension,defineTool } from '@earendil-works/pi-durable';
+import type { SessionRecord } from '../runtime/types.js';
+import type { InboxOptions } from './types.js';
+import { reportResult } from './reports.js';
+export function reportTools(options:()=>InboxOptions,session:(conversationId:number)=>SessionRecord){return defineExtension({name:'lorecrew-results',tools:[defineTool({name:'report_result',description:'Publish a completed report or meaningful finding from an actual scheduled root or assigned background workload. Quiet successful checks need no report. Reporting declares a deliverable; it does not verify claims. Use expectedRevision null initially and the current returned revision to replace an outcome.',replay:'safe',parameters:Type.Object({kind:Type.Union([Type.Literal('report'),Type.Literal('finding')]),title:Type.String({minLength:1,maxLength:200}),body:Type.String({minLength:1,maxLength:30000}),sourcePaths:Type.Array(Type.String({maxLength:1024}),{maxItems:50}),expectedRevision:Type.Union([Type.String(),Type.Null()])}),async execute(args,api){const caller=session(api.conversationId),ref=await reportResult(options(),caller,args,`tool:${caller.session.id}:${api.taskId}`);return {output:[{type:'text' as const,text:JSON.stringify(ref)}]};}})]});}

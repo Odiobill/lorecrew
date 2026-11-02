@@ -1,0 +1,17 @@
+import { afterEach, expect, it } from 'vitest';
+import { temporaryInstance } from '../helpers/temp.js';
+import { openInstance } from '../../src/instance/open.js';
+const cleanups:Array<()=>Promise<void>>=[];
+afterEach(async()=>{for(const close of cleanups.reverse())await close();cleanups.length=0;});
+async function fixture(){const f=await temporaryInstance();cleanups.push(f.cleanup);const ctx=await openInstance(f.paths);cleanups.push(()=>ctx.close());const mod=await import('../../src/runtime/compatibility.js').catch(()=>({assertCurrentExecutionState:undefined}));expect(mod.assertCurrentExecutionState,'explicit current-state format guard').toBeTypeOf('function');return {ctx,guard:mod.assertCurrentExecutionState!};}
+it.each([['runtime-session',{input:{agentId:'piren',mode:'read'}}],['team-task',{mode:'write'}],['workspace',{mode:'read'}],['team-request',{input:{mode:'write'}}]])('refuses obsolete %s without rewriting it',async(kind,record)=>{
+ const {ctx,guard}=await fixture();await ctx.store.transact(tx=>tx.put(kind as string,'old',record));await expect(guard(ctx)).rejects.toMatchObject({code:'PREVIEW_STATE_INCOMPATIBLE',message:expect.stringMatching(/fresh.*state/i)});expect(await ctx.store.read(kind as string,'old')).toEqual(record);
+});
+it('accepts fresh state and preserves exported historical text',async()=>{const {ctx,guard}=await fixture();await ctx.store.transact(tx=>tx.put('export-history','old',{mode:'read',input:{mode:'write'}}));await expect(guard(ctx)).resolves.toBeUndefined();});
+it('refuses queued legacy work before opening Pi or provider services',async()=>{
+ const f=await temporaryInstance();cleanups.push(f.cleanup);const ctx=await openInstance(f.paths);cleanups.push(()=>ctx.close());await ctx.store.transact(tx=>tx.put('team-request','queued',{input:{mode:'read'}}));
+ const {openRuntime}=await import('../../src/runtime/pi-host.js');const {openVault}=await import('../../src/vault/write.js');const {WorkspaceManager}=await import('../../src/workspaces/manager.js');const {ProcessSupervisor}=await import('../../src/workspaces/processes.js');const {openOwnership}=await import('../../src/projects/ownership.js');const {GitClient}=await import('../../src/git/client.js');
+ await expect(openRuntime({ctx,vault:openVault(ctx),ownership:openOwnership(ctx,new GitClient(),'origin'),workspaces:new WorkspaceManager(ctx),supervisor:new ProcessSupervisor(ctx)})).rejects.toMatchObject({code:'PREVIEW_STATE_INCOMPATIBLE'});
+ const {access}=await import('node:fs/promises');const {join}=await import('node:path');await expect(access(join(ctx.stateDir,'pi.sqlite'))).rejects.toMatchObject({code:'ENOENT'});expect(await ctx.store.read('team-request','queued')).toEqual({input:{mode:'read'}});
+});
+it('refuses legacy plain project execution before opening Pi and preserves all old records',async()=>{const {ctx,guard}=await fixture();await ctx.store.transact(tx=>{tx.put('project-binding','plain',{projectId:'plain',path:ctx.vaultDir});tx.put('workspace','plain',{id:'plain',projectId:'plain',taskId:'old',path:ctx.vaultDir,source:ctx.vaultDir,git:false,state:'active'});tx.put('plain-handoff','unfinished',{phase:'draining'});});await expect(guard(ctx)).rejects.toMatchObject({code:'MIGRATION_REQUIRED'});const {access}=await import('node:fs/promises');const {join}=await import('node:path');await expect(access(join(ctx.stateDir,'pi.sqlite'))).rejects.toBeTruthy();expect(await ctx.store.read('plain-handoff','unfinished')).toEqual({phase:'draining'});});
